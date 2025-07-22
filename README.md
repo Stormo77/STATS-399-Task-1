@@ -1,2 +1,2 @@
-# STATS-399-Tasks
-Repository for tasks for STATS 399 assignments
+# STATS-399-Task-1
+Repository for STATS 399 assignment task 1
