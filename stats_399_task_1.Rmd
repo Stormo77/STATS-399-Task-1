@@ -1,0 +1,36 @@
+---
+title: "Statistics 399 Task 1"
+author: "Noah Newby"
+date: "2025-07-22"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Libraries:
+
+```{r}
+library(tidyverse)
+```
+
+
+#code cleaning:
+```{r}
+renames <- c('first_feeling','second_feeling','third_feeling','fourth_feeling')
+survey.df <- read.csv("sentiment-survey-data.csv")
+
+survey_formatted <- survey.df %>%
+  rename(init_feel = 1, majority_feeling_guess = 2,instructor_feeling_guess = 3) %>%
+  mutate(
+    across(1:3, tolower)
+  ) %>%
+  separate(init_feel,renames, sep = ",") %>%
+  drop_na()%>%
+  filter(if_all((renames),~!str_detect(., "[0-9]|[\\p{So}\\p{Cn}]")))
+survey_formatted 
+
+
+```
+
