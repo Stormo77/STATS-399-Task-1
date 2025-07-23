@@ -1,6 +1,6 @@
 ---
 title: "Statistics 399 Task 1"
-author: "Noah Newby"
+author: "HiHi - H"
 date: "2025-07-22"
 output: html_document
 ---
