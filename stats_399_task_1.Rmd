@@ -9,28 +9,222 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-#Libraries:
-
+# clean the data
 ```{r}
-library(tidyverse)
-```
+# Libraries
+library(dplyr)
+library(stringr)
+library(tidyr)
 
+# read data
+df <- read.csv("sentiment-survey-data.csv", 
+               stringsAsFactors = FALSE)
 
-#code cleaning:
-```{r}
-renames <- c('first_feeling','second_feeling','third_feeling','fourth_feeling')
-survey.df <- read.csv("sentiment-survey-data.csv")
+# rename the col
+colnames(df) <- c("feeling_words", "majority_feeling_guess", "instructor_feeling_guess")
 
-survey_formatted <- survey.df %>%
-  rename(init_feel = 1, majority_feeling_guess = 2,instructor_feeling_guess = 3) %>%
+# make a function to clean the data
+clean_text <- function(x) {
+  x %>%
+    str_replace_all("[\U0001F600-\U0001F6FF]", "") %>%
+    str_replace_all("[[:punct:][:cntrl:]]", " ") %>%
+    str_replace_all("[^a-zA-Z0-9\\s]", " ") %>%
+    str_replace_all("\\s+", ",") %>%
+    str_replace_all(",+", ",") %>%
+    str_trim(side = "both") %>%
+    tolower()
+}
+
+# use the function to clean
+df_cleaned <- df %>%
   mutate(
-    across(1:3, tolower)
-  ) %>%
-  separate(init_feel,renames, sep = ",") %>%
-  drop_na()%>%
-  filter(if_all((renames),~!str_detect(., "[0-9]|[\\p{So}\\p{Cn}]")))
-survey_formatted 
+    feeling_words = clean_text(feeling_words),
+    majority_feeling_guess = clean_text(majority_feeling_guess),
+    instructor_feeling_guess = clean_text(instructor_feeling_guess)
+  )
 
+# sep
+df_cleaned <- df_cleaned %>%
+  separate(feeling_words,
+           into = c("first_feeling", "second_feeling",
+                    "third_feeling", "fourth_feeling", "extra"),
+           sep = ",", fill = "right", extra = "drop") %>%
+  select(-extra)
+
+# >=2 words, manually fix it
+multi_majority_idx <-
+  which(str_count(df_cleaned$majority_feeling_guess, ",") >= 1)
+multi_instructor_idx <- 
+  which(str_count(df_cleaned$instructor_feeling_guess, ",") >= 1)
+majority_replacements <- 
+  c("advance", "expected", "complex", "expected", "excited")
+instructor_replacements <- 
+  c("participated", "expected", "stressed", "happy", "excited")
+# as a whole df
+df_cleaned$majority_feeling_guess[multi_majority_idx] <- 
+  majority_replacements
+df_cleaned$instructor_feeling_guess[multi_instructor_idx] <- 
+  instructor_replacements
+
+# delete all NA
+df_cleaned <- df_cleaned %>% drop_na()
+
+# check
+head(df_cleaned)
+df_cleaned
+
+# csv file of cleaned data
+write.csv(df_cleaned, 
+          "cleaned_sentiment_data.csv", 
+          row.names = FALSE)
+```
+
+# plot
+```{r}
+# libraries and read data
+library(syuzhet)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(RColorBrewer)
+library(patchwork)
+
+A <- read.csv("cleaned_sentiment_data.csv", stringsAsFactors = FALSE)
+
+# tidy
+feeling_long <- A %>%
+  pivot_longer(cols = starts_with("first_feeling"),
+               names_to = "position", values_to = "feeling")
+
+# anlysis sentiment & top 6
+sentiment_scores <- get_nrc_sentiment(feeling_long$feeling)
+feeling_long$sentiment <- case_when(
+  sentiment_scores$positive == 1 ~ "Positive",
+  sentiment_scores$negative == 1 ~ "Negative",
+  TRUE ~ "Neutral")
+
+top6 <- feeling_long %>%
+  count(feeling, sentiment, sort = TRUE) %>%
+  slice_max(n, n = 6)
+
+# bar plot(Top 6 Students' Feelings about the Course)
+bar_plot <- ggplot(top6, aes(x = reorder(feeling, n), y = n, fill = sentiment)) +
+  geom_col(width = 0.8) +
+  coord_flip() +
+  scale_fill_brewer(palette = "Set1") +
+  labs(title = "Top 6 Students' Feelings about the Course", x = NULL, y = "Frequency") +
+  theme_minimal(base_size = 10) +
+  theme(legend.position = "top",
+        legend.text = element_text(size = 6),
+        plot.title = element_text(size = 12, face = "bold"),
+        axis.text.x = element_text(size = 10),
+        axis.text.y = element_text(size = 6))
+
+# anlysis all sentiment
+sentiment_summary <- feeling_long %>%
+  count(sentiment) %>%
+  mutate(percent = round(100 * n / sum(n), 1),
+         label = paste0(sentiment, " (", percent, "%)"))
+
+# pie chart(Overall Sentiment)
+pie_chart <- ggplot(sentiment_summary, aes(x = "", y = n, fill = sentiment)) +
+  geom_col(width = 1, color = "white") +
+  coord_polar("y") +
+  scale_fill_brewer(palette = "Set1") +
+  labs(title = "Overall Sentiment") +
+  theme_void(base_size = 10) +
+  theme(legend.title = element_blank(),
+        legend.text = element_text(size = 8),
+        legend.position = "right",
+        plot.title = element_text(size = 12, face = "bold"))
+
+
+# compare data
+compare_df <- A %>%
+  select(majority_feeling_guess, instructor_feeling_guess) %>%
+  pivot_longer(cols = everything(), names_to = "target", values_to = "feeling")
+
+compare_scores <- get_nrc_sentiment(compare_df$feeling)
+compare_df$sentiment <- case_when(
+  compare_scores$positive == 1 ~ "Positive",
+  compare_scores$negative == 1 ~ "Negative",
+  TRUE ~ "Neutral")
+
+compare_summary <- compare_df %>%
+  count(target, sentiment)
+
+# compare plot(Student Perceptions of Classmates vs Instructors)
+compare_plot <- ggplot(compare_summary, aes(x = sentiment, y = n, 
+                                            fill = target)) +
+  geom_col(position = position_dodge(width = 0.7), width = 0.6) +
+  scale_fill_brewer(palette = "Pastel1") +
+  labs(title = "Student Perceptions of Classmates vs Instructors",
+       x = "Sentiment Type", y = "Count", fill = "Target") +
+  theme_minimal(base_size = 10) +
+  theme(legend.position = "top",
+        legend.text = element_text(size = 10),
+        plot.title = element_text(size = 12, face = "bold"),
+        axis.text = element_text(size = 10))
+
+
+# make them together
+final_plot <- (bar_plot + pie_chart) / compare_plot +
+  plot_layout(heights = c(1, 1.2)) +
+  plot_annotation(title = "Sentiment Summary of the Course",
+                  theme = theme(plot.title = element_text(size = 16, 
+                                                          face = "bold", 
+                                                          hjust = 0.5)))
+
+# check and show
+print(final_plot)
+
+# save
+ggsave("Hihi-H-Graphic.pdf", final_plot, width = 10, height = 12)
 
 ```
+
+
+
+
+
+# plot simple version
+```{r}
+library(syuzhet)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(RColorBrewer)
+
+A <- read.csv("cleaned_sentiment_data.csv", stringsAsFactors = FALSE)
+
+feelings_long <- A %>%
+  pivot_longer(cols = starts_with("first_feeling"),
+               names_to = "position", values_to = "feeling") %>%
+  filter(!is.na(feeling))
+
+sentiment_scores <- get_nrc_sentiment(feelings_long$feeling)
+
+feelings_long$sentiment <- case_when(
+  sentiment_scores$positive == 1 ~ "Positive",
+  sentiment_scores$negative == 1 ~ "Negative",
+  TRUE ~ "Neutral")
+
+feeling_counts <- feelings_long %>%
+  count(feeling, sentiment, sort = TRUE) %>%
+  slice_max(order_by = n, n = 12)
+
+ggplot(feeling_counts, aes(x = reorder(feeling, n), y = n, fill = sentiment)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_brewer(palette = "Set1") +
+  labs(title = "Top 12 Feelings about the Course",
+       x = "Feeling Word",
+       y = "Frequency",
+       fill = "Sentiment Type") +
+  theme_minimal(base_size = 14)
+
+ggsave("Hihi-H-SimpleGraphic.pdf", width = 8, height = 6)
+
+```
+
 
